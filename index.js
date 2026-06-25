@@ -7,6 +7,19 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
 })
 
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN
+const CHAT_ID        = process.env.TELEGRAM_CHAT_ID
+
+// Fungsi kirim pesan Telegram
+async function sendTelegram(text) {
+  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`
+  await fetch(url, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: 'HTML' })
+  })
+}
+
 app.get('/', (c) => {
   return c.json({ status: '✅ Trading Bot aktif!' })
 })
@@ -47,6 +60,18 @@ Jawab dalam Bahasa Indonesia.`
 
     const analisis = response.content[0].text
     console.log('🤖 Analisis Claude:', analisis)
+
+    // Kirim ke Telegram
+    const emoji = data.action === 'BUY' ? '🟢' : '🔴'
+    const pesan = `${emoji} <b>${data.action} ${data.symbol}</b>
+💰 Harga: ${data.price}
+📊 RSI: ${data.rsi} | MACD: ${data.macd}
+⏰ Timeframe: ${data.tf} menit
+
+🤖 <b>Analisis Claude:</b>
+${analisis}`
+
+    await sendTelegram(pesan)
 
     return c.json({
       success:  true,
