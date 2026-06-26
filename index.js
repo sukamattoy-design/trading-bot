@@ -15,28 +15,19 @@ async function sendTelegram(text) {
   })
 }
 
-async function analisisGemini(data) {
-  const prompt = `Kamu adalah analis trading profesional.
-Analisis data market berikut dan berikan rekomendasi:
+async function analisisGemini(text) {
+  const prompt = `Kamu adalah analis trading profesional XAUUSD (Gold).
+Pengguna mengirim pesan: "${text}"
 
-Pair     : ${data.symbol}
-Harga    : ${data.price}
-RSI      : ${data.rsi}
-MACD     : ${data.macd}
-Signal   : ${data.signal}
-EMA 50   : ${data.ema50}
-EMA 200  : ${data.ema200}
-Timeframe: ${data.tf} menit
-Sinyal   : ${data.action}
-
-Berikan analisis singkat:
+Jika pesan berisi data trading (harga, sinyal BUY/SELL, RSI, dll), berikan analisis:
 1. Konfirmasi BUY atau SELL
 2. Alasan berdasarkan indikator
 3. Level SL yang disarankan
 4. Level TP yang disarankan
 5. Tingkat keyakinan (rendah/sedang/tinggi)
 
-Jawab dalam Bahasa Indonesia.`
+Jika pesan adalah pertanyaan umum tentang trading, jawab dengan helpful.
+Jawab dalam Bahasa Indonesia, singkat dan jelas.`
 
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
@@ -51,24 +42,22 @@ Jawab dalam Bahasa Indonesia.`
 
   const json = await res.json()
   console.log('Gemini response:', JSON.stringify(json))
-if (json.candidates && json.candidates[0]) {
-  return json.candidates[0].content.parts[0].text
-} else {
-  return 'Analisis tidak tersedia: ' + (json.error?.message || JSON.stringify(json))
-}
+  if (json.candidates && json.candidates[0]) {
+    return json.candidates[0].content.parts[0].text
+  } else {
+    return 'Analisis tidak tersedia: ' + (json.error?.message || JSON.stringify(json))
+  }
 }
 
-app.get('/', (c) => {
-  return c.json({ status: '✅ Trading Bot aktif!' })
-})
-
+// Endpoint webhook TradingView (tetap ada)
 app.post('/alert', async (c) => {
   try {
     const data = await c.req.json()
     console.log('📩 Data masuk:', data)
 
-    const analisis = await analisisGemini(data)
-    console.log('🤖 Analisis Gemini:', analisis)
+    const analisis = await analisisGemini(
+      `Sinyal ${data.action} ${data.symbol} harga ${data.price} RSI ${data.rsi} MACD ${data.macd} EMA50 ${data.ema50} EMA200 ${data.ema200} TF ${data.tf} menit`
+    )
 
     const emoji = data.action === 'BUY' ? '🟢' : '🔴'
     const pesan = `${emoji} <b>${data.action} ${data.symbol}</b>
@@ -80,13 +69,36 @@ app.post('/alert', async (c) => {
 ${analisis}`
 
     await sendTelegram(pesan)
-
     return c.json({ success: true, analisis })
 
   } catch (err) {
     console.error('❌ Error:', err)
     return c.json({ success: false, error: err.message }, 500)
   }
+})
+
+// Endpoint terima pesan dari Telegram
+app.post('/telegram', async (c) => {
+  try {
+    const data = await c.req.json()
+    const pesan = data.message?.text
+    console.log('📨 Pesan Telegram:', pesan)
+
+    if (!pesan) return c.json({ ok: true })
+
+    const analisis = await analisisGemini(pesan)
+    await sendTelegram(`🤖 <b>Analisis:</b>\n${analisis}`)
+
+    return c.json({ ok: true })
+
+  } catch (err) {
+    console.error('❌ Error:', err)
+    return c.json({ ok: false })
+  }
+})
+
+app.get('/', (c) => {
+  return c.json({ status: '✅ Trading Bot aktif!' })
 })
 
 serve({
