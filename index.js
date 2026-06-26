@@ -1,23 +1,56 @@
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
-import Anthropic from '@anthropic-ai/sdk'
 
-const app       = new Hono()
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
-})
+const app = new Hono()
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const CHAT_ID        = process.env.TELEGRAM_CHAT_ID
+const GEMINI_KEY     = process.env.GEMINI_API_KEY
 
-// Fungsi kirim pesan Telegram
 async function sendTelegram(text) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`
-  await fetch(url, {
+  await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ chat_id: CHAT_ID, text, parse_mode: 'HTML' })
   })
+}
+
+async function analisisGemini(data) {
+  const prompt = `Kamu adalah analis trading profesional.
+Analisis data market berikut dan berikan rekomendasi:
+
+Pair     : ${data.symbol}
+Harga    : ${data.price}
+RSI      : ${data.rsi}
+MACD     : ${data.macd}
+Signal   : ${data.signal}
+EMA 50   : ${data.ema50}
+EMA 200  : ${data.ema200}
+Timeframe: ${data.tf} menit
+Sinyal   : ${data.action}
+
+Berikan analisis singkat:
+1. Konfirmasi BUY atau SELL
+2. Alasan berdasarkan indikator
+3. Level SL yang disarankan
+4. Level TP yang disarankan
+5. Tingkat keyakinan (rendah/sedang/tinggi)
+
+Jawab dalam Bahasa Indonesia.`
+
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
+    {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    }
+  )
+
+  const json = await res.json()
+  return json.candidates[0].content.parts[0].text
 }
 
 app.get('/', (c) => {
@@ -29,57 +62,21 @@ app.post('/alert', async (c) => {
     const data = await c.req.json()
     console.log('📩 Data masuk:', data)
 
-    const response = await anthropic.messages.create({
-      model:      'claude-sonnet-4-6',
-      max_tokens: 1000,
-      messages: [{
-        role:    'user',
-        content: `Kamu adalah analis trading profesional.
-Analisis data market berikut dan berikan rekomendasi:
+    const analisis = await analisisGemini(data)
+    console.log('🤖 Analisis Gemini:', analisis)
 
-Pair    : ${data.symbol}
-Harga   : ${data.price}
-RSI     : ${data.rsi}
-MACD    : ${data.macd}
-Signal  : ${data.signal}
-EMA 50  : ${data.ema50}
-EMA 200 : ${data.ema200}
-Timeframe: ${data.tf} menit
-Sinyal awal: ${data.action}
-
-Berikan analisis singkat dan jelas:
-1. Konfirmasi BUY atau SELL
-2. Alasan berdasarkan indikator
-3. Level SL (Stop Loss) yang disarankan
-4. Level TP (Take Profit) yang disarankan
-5. Tingkat keyakinan (rendah/sedang/tinggi)
-
-Jawab dalam Bahasa Indonesia.`
-      }]
-    })
-
-    const analisis = response.content[0].text
-    console.log('🤖 Analisis Claude:', analisis)
-
-    // Kirim ke Telegram
     const emoji = data.action === 'BUY' ? '🟢' : '🔴'
     const pesan = `${emoji} <b>${data.action} ${data.symbol}</b>
 💰 Harga: ${data.price}
 📊 RSI: ${data.rsi} | MACD: ${data.macd}
 ⏰ Timeframe: ${data.tf} menit
 
-🤖 <b>Analisis Claude:</b>
+🤖 <b>Analisis Gemini:</b>
 ${analisis}`
 
     await sendTelegram(pesan)
 
-    return c.json({
-      success:  true,
-      symbol:   data.symbol,
-      action:   data.action,
-      price:    data.price,
-      analisis: analisis
-    })
+    return c.json({ success: true, analisis })
 
   } catch (err) {
     console.error('❌ Error:', err)
