@@ -50,7 +50,12 @@ Jawab dalam Bahasa Indonesia.`
   )
 
   const json = await res.json()
+  console.log('Gemini response:', JSON.stringify(json))
+if (json.candidates && json.candidates[0]) {
   return json.candidates[0].content.parts[0].text
+} else {
+  return 'Analisis tidak tersedia: ' + (json.error?.message || JSON.stringify(json))
+}
 }
 
 app.get('/', (c) => {
