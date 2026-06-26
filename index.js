@@ -5,7 +5,7 @@ const app = new Hono()
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const CHAT_ID        = process.env.TELEGRAM_CHAT_ID
-const GEMINI_KEY     = process.env.GEMINI_API_KEY
+const GROQ_KEY       = process.env.GROQ_API_KEY
 
 async function sendTelegram(text) {
   await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
@@ -15,48 +15,46 @@ async function sendTelegram(text) {
   })
 }
 
-async function analisisGemini(text) {
-  const prompt = `Kamu adalah analis trading profesional XAUUSD (Gold).
-Pengguna mengirim pesan: "${text}"
-
-Jika pesan berisi data trading (harga, sinyal BUY/SELL, RSI, dll), berikan analisis:
-1. Konfirmasi BUY atau SELL
-2. Alasan berdasarkan indikator
-3. Level SL yang disarankan
-4. Level TP yang disarankan
-5. Tingkat keyakinan (rendah/sedang/tinggi)
-
-Jika pesan adalah pertanyaan umum tentang trading, jawab dengan helpful.
-Jawab dalam Bahasa Indonesia, singkat dan jelas.`
-
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-    {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
-      })
-    }
-  )
+async function analisisGroq(text) {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method:  'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': `Bearer ${GROQ_KEY}`
+    },
+    body: JSON.stringify({
+      model: 'llama-3.1-8b-instant',
+      messages: [
+        {
+          role:    'system',
+          content: 'Kamu adalah analis trading profesional XAUUSD (Gold). Jawab dalam Bahasa Indonesia, singkat dan jelas.'
+        },
+        {
+          role:    'user',
+          content: text
+        }
+      ],
+      max_tokens: 500
+    })
+  })
 
   const json = await res.json()
-  console.log('Gemini response:', JSON.stringify(json))
-  if (json.candidates && json.candidates[0]) {
-    return json.candidates[0].content.parts[0].text
+  console.log('Groq response:', JSON.stringify(json))
+  if (json.choices && json.choices[0]) {
+    return json.choices[0].message.content
   } else {
     return 'Analisis tidak tersedia: ' + (json.error?.message || JSON.stringify(json))
   }
 }
 
-// Endpoint webhook TradingView (tetap ada)
+// Endpoint webhook TradingView
 app.post('/alert', async (c) => {
   try {
     const data = await c.req.json()
     console.log('📩 Data masuk:', data)
 
-    const analisis = await analisisGemini(
-      `Sinyal ${data.action} ${data.symbol} harga ${data.price} RSI ${data.rsi} MACD ${data.macd} EMA50 ${data.ema50} EMA200 ${data.ema200} TF ${data.tf} menit`
+    const analisis = await analisisGroq(
+      `Sinyal ${data.action} ${data.symbol} harga ${data.price} RSI ${data.rsi} MACD ${data.macd} EMA50 ${data.ema50} EMA200 ${data.ema200} TF ${data.tf} menit. Berikan analisis singkat: konfirmasi BUY/SELL, alasan, SL, TP, tingkat keyakinan.`
     )
 
     const emoji = data.action === 'BUY' ? '🟢' : '🔴'
@@ -65,7 +63,7 @@ app.post('/alert', async (c) => {
 📊 RSI: ${data.rsi} | MACD: ${data.macd}
 ⏰ Timeframe: ${data.tf} menit
 
-🤖 <b>Analisis Gemini:</b>
+🤖 <b>Analisis AI:</b>
 ${analisis}`
 
     await sendTelegram(pesan)
@@ -77,7 +75,7 @@ ${analisis}`
   }
 })
 
-// Endpoint terima pesan dari Telegram
+// Endpoint terima pesan manual dari Telegram
 app.post('/telegram', async (c) => {
   try {
     const data = await c.req.json()
@@ -86,7 +84,7 @@ app.post('/telegram', async (c) => {
 
     if (!pesan) return c.json({ ok: true })
 
-    const analisis = await analisisGemini(pesan)
+    const analisis = await analisisGroq(pesan)
     await sendTelegram(`🤖 <b>Analisis:</b>\n${analisis}`)
 
     return c.json({ ok: true })
